@@ -1,79 +1,109 @@
 const dotenv = require("dotenv");
 const Bot = (require("@dlghq/dialog-bot-sdk"));
+const { MessageAttachment, ActionGroup, Action, Button } = (require("@dlghq/dialog-bot-sdk"));
 const { flatMap } = require('rxjs/operators');
 const axios = require('axios');
-const requests = require('requests');
+const { combineLatest, merge } = require('rxjs');
+const moment = require('moment');
 
-var jsonQ=require("jsonq");
 
 dotenv.config();
 
 
-
-const credentials =  process.env.JIRA_USERNAME + ":" + process.env.JIRA_API_TOKEN
-const  credsBase64 = Buffer.from(credentials).toString('base64');
-
-const jiraUrl = "https://klisfer.atlassian.net/rest/api/2/issue/";
-// console.log(Object.getOwnPropertyNames(Bot));
-
-
-
-const inprogressIssues = [];
-
-
-  
- var headers = {
+const credentials = process.env.JIRA_USERNAME + ":" + process.env.JIRA_API_TOKEN
+const credsBase64 = Buffer.from(credentials).toString('base64');
+var inprogressIssues = "";
+const headers = {
   'Authorization': 'Basic ' + credsBase64,
   'Content-Type': 'application/json',
-  };
-
-  
+};
 
 
+async function run(token, endpoint) {
+  const bot = new Bot.default({
+    token,
+    endpoints: [endpoint]
+  });
 
+  const self = await bot.getSelf();
+  console.log(`I've started, post me something @${self.nick}`);
 
-const token = process.env.BOT_TOKEN;
- if (typeof token !== 'string'){
-  throw new Error('BOT_TOKEN env variable not configured');
+  bot.updateSubject.subscribe({
+    next(update) {
+      // console.log(JSON.stringify({ update }, null, 2));
+    }
+  });
+
+  const messagesHandle = bot
+    .subscribeToMessages()
+    .pipe(flatMap(async (message) => {
+      console.log("MESSAGE", message);
+      if ((message.content.type === 'text') && (message.content.text === process.env.TEXT_MESSAGE)) {
+
+        axios({
+          url: process.env.JIRA_URL,
+          method: 'get',
+          headers: headers,
+
+        })
+          .then(response => {
+            response.data.issues.map((issue) => {
+              const formattedText = formatJiraText(issue) + "\n";
+              inprogressIssues += formattedText;
+            })
+            sendTextToBot(bot , message);
+            inprogressIssues = "";
+          }).catch(err => {
+            console.log(err);
+          });
+      }
+    }));
+
+  const actionsHandle = bot
+    .subscribeToActions()
+    .pipe(flatMap(async (event) => console.log(JSON.stringify(event, null, 2))));
+
+  await new Promise((resolve, reject) => {
+    merge(messagesHandle, actionsHandle)
+      .subscribe({
+        error: reject,
+        complete: resolve
+      });
+  });
 }
 
 
+const token = process.env.BOT_TOKEN;
+if (typeof token !== 'string') {
+  throw new Error('BOT_TOKEN env variable not configured');
+}
+
+const endpoint = process.env.BOT_ENDPOINT || 'https://grpc-test.transmit.im:9443';
+
+run(token, endpoint)
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 
 
 
+function formatJiraText(issue) {
+  const timeInProgress = moment(issue.fields.updated).fromNow();
+  const projectId = issue.fields.project.key;
+  const taskId = issue.id;
+  const taskUrl = issue.self;
+  const taskTitle = issue.fields.summary;
+  const outputFormat = timeInProgress + " - " + "[" + projectId + "-" + taskId + "](" + taskUrl + ") :" + taskTitle
+  return outputFormat;
+}
 
-const bot = new Bot.default({
-  token,
-  endpoints: ['https://grpc-test.transmit.im:9443']
-});
+function sendTextToBot(bot, message) {
+  bot
+  .sendText(
+    message.peer,
+    inprogressIssues,
+    MessageAttachment.reply(message.id),
+  );
 
-
-
-
-
-
-bot.updateSubject.subscribe({
-  next(update) {
-    const updatedMessage = jsonQ(update).find("text").value()
-    console.log(updatedMessage.toString());  
-    if(updatedMessage.toString() === process.env.TEXT_MESSAGE){
-      axios({
-        url: 'https://klisfer.atlassian.net/rest/api/2/search?jql=status=%22In+Progress%22',
-        method: 'get',
-        headers: headers,
-        
-        })
-      .then(response => {  
-        console.log(response.data.issues);  
-           response.data.issues.map((issue) =>{
-                inprogressIssues.push(issue.fields);
-           })
-         
-      }).catch(err => {
-        console.log(err);
-      });
-    }
-  }
-});
-
-
+}
