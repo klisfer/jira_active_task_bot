@@ -3,7 +3,7 @@ const Bot = (require("@dlghq/dialog-bot-sdk"));
 const { MessageAttachment, ActionGroup, Action, Button } = (require("@dlghq/dialog-bot-sdk"));
 const { flatMap } = require('rxjs/operators');
 const axios = require('axios');
-const { combineLatest, merge } = require('rxjs');
+const { merge } = require('rxjs');
 const moment = require('moment');
 
 
@@ -25,15 +25,20 @@ async function run(token, endpoint) {
     endpoints: [endpoint]
   });
 
+  //fetching bot name  
   const self = await bot.getSelf();
   console.log(`I've started, post me something @${self.nick}`);
 
+
+
   bot.updateSubject.subscribe({
     next(update) {
-      // console.log(JSON.stringify({ update }, null, 2));
+      console.log(JSON.stringify({ update }, null, 2));
     }
   });
 
+
+  //subscribing to incoming messages 
   const messagesHandle = bot
     .subscribeToMessages()
     .pipe(flatMap(async (message) => {
@@ -59,10 +64,14 @@ async function run(token, endpoint) {
       }
     }));
 
+
+  //creating action handle
   const actionsHandle = bot
     .subscribeToActions()
     .pipe(flatMap(async (event) => console.log(JSON.stringify(event, null, 2))));
 
+
+// merging actionHandle with messageHandle
   await new Promise((resolve, reject) => {
     merge(messagesHandle, actionsHandle)
       .subscribe({
@@ -72,12 +81,13 @@ async function run(token, endpoint) {
   });
 }
 
-
+//token to connect to the bot
 const token = process.env.BOT_TOKEN;
 if (typeof token !== 'string') {
   throw new Error('BOT_TOKEN env variable not configured');
 }
 
+//bot endpoint
 const endpoint = process.env.BOT_ENDPOINT || 'https://grpc-test.transmit.im:9443';
 
 run(token, endpoint)
